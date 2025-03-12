@@ -1,0 +1,11 @@
+name: WMA_openCV
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12.5
+  - opencv
+  - matplotlib==3.10.1
+  - numpy==2.2.3
+  - pip:
+      - tk
