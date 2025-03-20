@@ -7,7 +7,7 @@ import os
 
 def uploud(i):
     global files, image
-    image = cv2.imread(r'C:\Users\macmac\Downloads\pliki\{}'.format(files[i-ord('0')]))
+    image = cv2.imread(r'images/{}'.format(files[i-ord('0')]))
     norm_size()
 
 
@@ -133,7 +133,7 @@ files = None
 
 def main():
     global image, fun, files
-    files = os.listdir(r'C:\Users\macmac\Downloads\pliki')
+    files = os.listdir(r'images')
     uploud(ord('0'))
     nimg = image.copy()
     cv2.createTrackbar('low', 'obrazek', 0, 255, change_h)

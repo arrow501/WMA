@@ -1,0 +1,36 @@
+# Image Processing Application Keyboard Shortcuts
+
+## Image Selection
+- 0-9: Load and display different images from the 'images' folder
+
+## Image Size
+- - (minus): Resize image (10% smaller)
+- = (equals): Restore original image display
+
+## Color Transformations
+- q: Convert image to grayscale
+- w: Convert image from BGR to HSV colorspace
+
+## HSV Processing
+- e: Apply HSV range thresholding (mask only)
+- r: Apply HSV range thresholding with bitwise-AND
+- t: Apply HSV range with median blur filter
+- z: Display only H (Hue) channel
+- x: Display only S (Saturation) channel
+- c: Display only V (Value) channel
+
+## Filters and Effects
+- a: Apply Canny edge detection
+- s: Apply blur with 7x7 kernel
+- d: Apply blur followed by Canny edge detection
+- f: Apply morphological opening operation (noise removal)
+- g: Apply morphological closing operation (fill small holes)
+- h: Detect object contour and draw marker at center point
+
+## Controls
+- ESC: Close all windows and exit the program
+
+## Trackbars
+- low: Set lower threshold for HSV color filtering
+- high: Set upper threshold for HSV color filtering
+- ksize: Set kernel size for blur and morphological operations
