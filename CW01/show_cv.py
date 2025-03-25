@@ -78,10 +78,10 @@ def main():
     global files
     
     # Pobranie listy plików z katalogu
-    files = os.listdir(r'c:\\Users\\trape\\GitHub\\WMA_PL_dzienne_macmac\\cw1\\pliki')
+    files = os.listdir(r'./images')
 
     # Wczytanie pierwszego obrazu z listy
-    image = cv2.imread(r'c:\\Users\\trape\\GitHub\\WMA_PL_dzienne_macmac\\cw1\\pliki\\{0}'.format(files[0]))
+    image = cv2.imread(r'./images/{0}'.format(files[0]))
     
     # Zmiana rozmiaru obrazu do rozmiaru ekranu
     resize_image_to_screen_size()
@@ -100,7 +100,7 @@ def main():
             fun()
         if key <= ord('9') and key >= ord('0'):
             fun = None
-            image = cv2.imread(r'c:\\Users\\trape\\GitHub\\WMA_PL_dzienne_macmac\\cw1\\pliki\\{}'.format(files[key-ord('0')]))
+            image = cv2.imread(r'./images/{}'.format(files[key-ord('0')]))
             resize_image_to_screen_size()
         elif key == 27:
             cv2.destroyAllWindows()

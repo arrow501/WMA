@@ -1,7 +1,7 @@
 # Image Processing Application Keyboard Shortcuts
 
 ## Image Selection
-- 0-9: Load and display different images from the 'images' folder
+- 0-9: Load and displsay different images from the 'images' folder
 
 ## Image Size
 - - (minus): Resize image (10% smaller)

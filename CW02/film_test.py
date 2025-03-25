@@ -1,7 +1,7 @@
 import cv2
 
 video = cv2.VideoCapture()
-video.open(r'C:\Users\macmac\Downloads\movingball.mp4')
+video.open(r'./CW02/movingball.mp4')
 total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
 
 frame_width = int(video.get(3))
