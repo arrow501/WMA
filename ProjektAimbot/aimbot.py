@@ -147,17 +147,20 @@ def mask_ball(hsv_frame):
     return cv2.bitwise_or(mask_midtone, mask_highlight)
 
 def notebook_mask(hsv_frame):
-    # Define ranges for neon yellow in HSV
-    lower_yellow = np.array([0, 0, 79])
-    upper_yellow = np.array([116, 120, 255])
-    # Create mask for yellow notebook
-    mask = cv2.inRange(hsv_frame, lower_yellow, upper_yellow)
+    # Use the global HSV threshold values
+    global hsv_lower, hsv_upper
+    
+    # Create mask for yellow notebook using the current threshold values
+    mask = cv2.inRange(hsv_frame, hsv_lower, hsv_upper)
     
     # Apply morphological operations if needed
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
     
     return mask
 
+# Default HSV values for notebook detection
+hsv_lower = np.array([90, 200, 100])
+hsv_upper = np.array([160, 255, 255])
 
 def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw_crosshair_flag=True, 
                  use_bw_background=True, blur_strength=18, video_type='ball'):
@@ -321,8 +324,16 @@ def create_gui():
     video_dropdown = tk.OptionMenu(video_frame, selected_video, *video_options)
     video_dropdown.pack(side=tk.LEFT, padx=5)
     
+    # Add HSV tuner button
+    hsv_tuner_button = tk.Button(video_frame, text="Tune HSV", 
+                               command=lambda: create_hsv_tuner(root))
+    hsv_tuner_button.pack(side=tk.LEFT, padx=5)
+    
     # Link the variable to the callback
     selected_video.trace_add("write", on_video_change)
+    
+    # Add handler for the refresh view event
+    root.bind("<<RefreshView>>", lambda e: show_frame())
     
     # Frame slider
     frame_slider = tk.Scale(controls_frame, from_=0, to=len(frames)-1 if frames else 0,
@@ -410,6 +421,171 @@ def create_gui():
         show_frame(0)
     
     return root
+
+def create_hsv_tuner(parent):
+    """Create a window for tuning HSV values with live preview."""
+    global hsv_lower, hsv_upper
+    
+    # Create a new top-level window
+    tuner = tk.Toplevel(parent)
+    tuner.title("HSV Tuner")
+    tuner.geometry("800x600")
+    
+    # Split the window into two frames
+    controls_frame = tk.Frame(tuner)
+    controls_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+    
+    preview_frame = tk.Frame(tuner)
+    preview_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+    
+    # Canvas for displaying the preview
+    preview_canvas = tk.Canvas(preview_frame, bg="black")
+    preview_canvas.pack(fill=tk.BOTH, expand=True)
+    
+    # Create variables for HSV values
+    h_min = tk.IntVar(value=hsv_lower[0])
+    s_min = tk.IntVar(value=hsv_lower[1])
+    v_min = tk.IntVar(value=hsv_lower[2])
+    
+    h_max = tk.IntVar(value=hsv_upper[0])
+    s_max = tk.IntVar(value=hsv_upper[1])
+    v_max = tk.IntVar(value=hsv_upper[2])
+    
+    # Function to update HSV values and refresh the preview
+    def update_hsv(*args):
+        global hsv_lower, hsv_upper
+        
+        # Update global HSV values
+        hsv_lower = np.array([h_min.get(), s_min.get(), v_min.get()])
+        hsv_upper = np.array([h_max.get(), s_max.get(), v_max.get()])
+        
+        # Update the preview if we have frames
+        if frames and current_frame_index < len(frames):
+            update_preview()
+    
+    # Create sliders for HSV values
+    tk.Label(controls_frame, text="HSV Range Controls", font=("Arial", 14, "bold")).pack(pady=10)
+    
+    # Hue controls (0-179 in OpenCV)
+    hue_frame = tk.LabelFrame(controls_frame, text="Hue", padx=10, pady=5)
+    hue_frame.pack(fill=tk.X, pady=5)
+    
+    tk.Label(hue_frame, text="Min:").pack(side=tk.LEFT)
+    tk.Scale(hue_frame, from_=0, to=179, orient=tk.HORIZONTAL, 
+             variable=h_min, command=lambda _: update_hsv()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    tk.Label(hue_frame, text="Max:").pack(side=tk.LEFT)
+    tk.Scale(hue_frame, from_=0, to=179, orient=tk.HORIZONTAL,
+             variable=h_max, command=lambda _: update_hsv()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    # Saturation controls (0-255)
+    sat_frame = tk.LabelFrame(controls_frame, text="Saturation", padx=10, pady=5)
+    sat_frame.pack(fill=tk.X, pady=5)
+    
+    tk.Label(sat_frame, text="Min:").pack(side=tk.LEFT)
+    tk.Scale(sat_frame, from_=0, to=255, orient=tk.HORIZONTAL,
+             variable=s_min, command=lambda _: update_hsv()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    tk.Label(sat_frame, text="Max:").pack(side=tk.LEFT)
+    tk.Scale(sat_frame, from_=0, to=255, orient=tk.HORIZONTAL,
+             variable=s_max, command=lambda _: update_hsv()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    # Value controls (0-255)
+    val_frame = tk.LabelFrame(controls_frame, text="Value (Brightness)", padx=10, pady=5)
+    val_frame.pack(fill=tk.X, pady=5)
+    
+    tk.Label(val_frame, text="Min:").pack(side=tk.LEFT)
+    tk.Scale(val_frame, from_=0, to=255, orient=tk.HORIZONTAL,
+             variable=v_min, command=lambda _: update_hsv()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    tk.Label(val_frame, text="Max:").pack(side=tk.LEFT)
+    tk.Scale(val_frame, from_=0, to=255, orient=tk.HORIZONTAL,
+             variable=v_max, command=lambda _: update_hsv()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    # Save and reset buttons
+    buttons_frame = tk.Frame(controls_frame)
+    buttons_frame.pack(fill=tk.X, pady=10)
+    
+    def reset_values():
+        # Reset to default values
+        h_min.set(90)
+        s_min.set(200)
+        v_min.set(100)
+        h_max.set(160)
+        s_max.set(255)
+        v_max.set(255)
+        update_hsv()
+    
+    # Current values display
+    values_frame = tk.LabelFrame(controls_frame, text="Current Values", padx=10, pady=5)
+    values_frame.pack(fill=tk.X, pady=10)
+    
+    values_text = tk.Text(values_frame, height=2, width=30)
+    values_text.pack(fill=tk.X)
+    
+    def update_values_text():
+        values_text.delete(1.0, tk.END)
+        values_text.insert(tk.END, f"Lower: [{h_min.get()}, {s_min.get()}, {v_min.get()}]\n")
+        values_text.insert(tk.END, f"Upper: [{h_max.get()}, {s_max.get()}, {v_max.get()}]")
+        # Schedule next update
+        tuner.after(100, update_values_text)
+    
+    # Start updating the text
+    update_values_text()
+    
+    tk.Button(buttons_frame, text="Reset to Default", command=reset_values).pack(side=tk.LEFT, padx=5)
+    tk.Button(buttons_frame, text="Apply to Main View", command=lambda: parent.event_generate("<<RefreshView>>")).pack(side=tk.RIGHT, padx=5)
+    
+    def update_preview():
+        """Update the preview image with current HSV settings."""
+        if not frames or current_frame_index >= len(frames):
+            return
+        
+        frame = frames[current_frame_index]
+        if frame is None:
+            return
+        
+        # Process the frame to show the mask
+        blurred = cv2.GaussianBlur(frame, (37, 37), 0)  # Using default blur
+        hsv_frame = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        
+        # Get the mask with current HSV values
+        mask = cv2.inRange(hsv_frame, hsv_lower, hsv_upper)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
+        
+        # Apply the mask to show the detected area in color
+        preview_img = overlay_on_bw(frame, mask)
+        
+        # Resize to fit the canvas
+        preview_width = preview_canvas.winfo_width()
+        preview_height = preview_canvas.winfo_height()
+        
+        if preview_width <= 1 or preview_height <= 1:
+            preview_width = 400
+            preview_height = 300
+        
+        display_frame = resize_frame(preview_img, preview_width, preview_height)
+        
+        # Convert to PhotoImage
+        rgb_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb_frame)
+        img_tk = ImageTk.PhotoImage(image=img)
+        
+        # Update canvas
+        preview_canvas.delete("all")
+        preview_canvas.create_image(preview_width//2, preview_height//2, image=img_tk, anchor=tk.CENTER)
+        preview_canvas.image = img_tk  # Keep a reference
+    
+    # Handle window resize for preview
+    def on_preview_resize(event):
+        update_preview()
+    
+    preview_canvas.bind("<Configure>", on_preview_resize)
+    
+    # Initial preview
+    tuner.after(100, update_preview)
+    
+    return tuner
 
 def main():
     # Load frames from the default video (ball)
