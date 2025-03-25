@@ -3,15 +3,17 @@ import numpy as np
 import tkinter as tk
 from PIL import Image, ImageTk
 
-video_path = r'./CW02/movingball.mp4'
+
+ball_video_path = r'./ProjektAimbot/movingball.mp4'
+notebook_video_path = r'./ProjektAimbot/fluorescent_notebook.mp4'
 
 # Global variables
 frames = []
 current_frame_index = 0
-frame_sampling_rate = 1  
+frame_sampling_rate = 30
+current_video_type = 'ball'  # Default to ball video
 
-def load(skip_frames=30): # Load every 30th frame by default
-    """Load frames from the video file."""
+def load(video_path, skip_frames=30): # Load every 30th frame by default
     global frames, frame_sampling_rate
     frame_sampling_rate = skip_frames
     
@@ -144,9 +146,21 @@ def mask_ball(hsv_frame):
    
     return cv2.bitwise_or(mask_midtone, mask_highlight)
 
+def notebook_mask(hsv_frame):
+    # Define ranges for neon yellow in HSV
+    lower_yellow = np.array([0, 0, 79])
+    upper_yellow = np.array([116, 120, 255])
+    # Create mask for yellow notebook
+    mask = cv2.inRange(hsv_frame, lower_yellow, upper_yellow)
+    
+    # Apply morphological operations if needed
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
+    
+    return mask
 
-def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw_crosshair_flag=True, use_bw_background=True, blur_strength=18):
-    '''Process a single frame through the image processing pipeline.'''
+
+def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw_crosshair_flag=True, 
+                 use_bw_background=True, blur_strength=18, video_type='ball'):
     if raw_frame is None:
         return None, {}
     
@@ -162,8 +176,11 @@ def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw
     # Convert the frame to HSV colorspace
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    # Create a binary mask
-    mask = mask_ball(hsv_frame)
+    # Create a binary mask based on selected video type
+    if video_type == 'notebook':
+        mask = notebook_mask(hsv_frame)
+    else:  # default to ball
+        mask = mask_ball(hsv_frame)
 
     # apply morphological close operation
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
@@ -208,12 +225,11 @@ def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw
     return frame, results
 
 def create_gui():
-    """Create the main GUI window."""
-    global current_frame_index
+    global current_frame_index, current_video_type
     
     # Create the main window
     root = tk.Tk()
-    root.title("Ball Tracking")
+    root.title("Object Tracking")
     
     # Set window size (720p height)
     window_width = 1280
@@ -260,9 +276,9 @@ def create_gui():
     crosshair_cb.pack(side=tk.LEFT, padx=10)
     bw_background_cb.pack(side=tk.LEFT, padx=10)
     
-    # Right side - blur slider
+    # Middle - blur slider
     blur_frame = tk.Frame(markers_frame)
-    blur_frame.pack(side=tk.RIGHT, fill=tk.X, padx=10)
+    blur_frame.pack(side=tk.LEFT, fill=tk.X, padx=10, expand=True)
     
     blur_strength = tk.IntVar(value=18)  # Default value 18 (kernel size 37)
     
@@ -270,6 +286,43 @@ def create_gui():
     blur_slider = tk.Scale(blur_frame, from_=0, to=25, orient=tk.HORIZONTAL, 
                          variable=blur_strength, length=150, command=lambda _: show_frame())
     blur_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+    
+    # Right side - video selection dropdown
+    video_frame = tk.Frame(markers_frame)
+    video_frame.pack(side=tk.RIGHT, fill=tk.X, padx=10)
+    
+    tk.Label(video_frame, text="Video:").pack(side=tk.LEFT, padx=5)
+    
+    video_options = ["Ball", "Notebook"]
+    selected_video = tk.StringVar(value=video_options[0])  # Default to Ball
+    
+    def on_video_change(*args):
+        # Handle video change
+        video_choice = selected_video.get()
+        global current_video_type
+        
+        if video_choice == "Ball":
+            if not load(ball_video_path, frame_sampling_rate):
+                print("Failed to load ball video")
+                return
+            current_video_type = 'ball'
+        else:  # Notebook
+            if not load(notebook_video_path, frame_sampling_rate):
+                print("Failed to load notebook video")
+                return
+            current_video_type = 'notebook'
+        
+        # Update frame slider max value
+        frame_slider.config(to=len(frames)-1 if frames else 0)
+        
+        # Reset to first frame
+        show_frame(0)
+    
+    video_dropdown = tk.OptionMenu(video_frame, selected_video, *video_options)
+    video_dropdown.pack(side=tk.LEFT, padx=5)
+    
+    # Link the variable to the callback
+    selected_video.trace_add("write", on_video_change)
     
     # Frame slider
     frame_slider = tk.Scale(controls_frame, from_=0, to=len(frames)-1 if frames else 0,
@@ -295,7 +348,8 @@ def create_gui():
             show_bbox.get(), 
             show_crosshair.get(),
             use_bw_background.get(),
-            blur_strength.get()  # Blur strength parameter
+            blur_strength.get(),
+            current_video_type  # Pass the current video type
         )
         
         # Update slider position
@@ -358,8 +412,8 @@ def create_gui():
     return root
 
 def main():
-    # Load frames
-    if not load(frame_sampling_rate):
+    # Load frames from the default video (ball)
+    if not load(ball_video_path, frame_sampling_rate):
         print("Failed to load video frames")
         return
     

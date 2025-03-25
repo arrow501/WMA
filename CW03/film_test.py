@@ -5,11 +5,11 @@ import os
 n = 30
 
 # Create output directory if it doesn't exist
-output_dir = "./ball_frames"
+output_dir = "./notebook_frames"
 os.makedirs(output_dir, exist_ok=True)
 
 video = cv2.VideoCapture()
-video.open(r'CW03\movingball.mp4')
+video.open(r'ProjektAimbot\fluorescent_notebook.mp4')
 total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
 
 counter = 1
