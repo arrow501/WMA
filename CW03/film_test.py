@@ -1,14 +1,16 @@
 import cv2
+import os
+
+# Save every nth frame (default is 30)
+n = 30
+
+# Create output directory if it doesn't exist
+output_dir = "./ball_frames"
+os.makedirs(output_dir, exist_ok=True)
 
 video = cv2.VideoCapture()
 video.open(r'CW03\movingball.mp4')
 total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-
-frame_width = int(video.get(3))
-frame_height = int(video.get(4))
-size = (frame_width, frame_height)
-result = cv2.VideoWriter(
-    'result.avi',  cv2.VideoWriter_fourcc(*'MJPG'), 20, size)
 
 counter = 1
 
@@ -17,12 +19,18 @@ while True:
     if not success:
         break
     print('klatka {} z {}'.format(counter, total_frames))
+    
+    # Add text to even frames
     if counter % 2 == 0:
         cv2.putText(frame_rgb, 'pilka', (100, 150),
                     cv2.FONT_HERSHEY_SIMPLEX, 4, (255, 0, 0), 4)
-
-    result.write(frame_rgb)
+    
+    # Save every nth frame
+    if counter % n == 0:
+        frame_filename = os.path.join(output_dir, f"frame_{counter:05d}.jpg")
+        cv2.imwrite(frame_filename, frame_rgb)
+    
     counter = counter + 1
 
 video.release()
-result.release()
+print(f"Saved every {n}th frame to {output_dir}")

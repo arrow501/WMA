@@ -2,12 +2,12 @@ import cv2
 import numpy as np
 import os
 
-# pip install opencv-python
-
+image_directory = "./ball_frames"
+# image_directory = "./images"
 
 def uploud(i):
     global files, image
-    image = cv2.imread(r'images/{}'.format(files[i-ord('0')]))
+    image = cv2.imread('{}/{}'.format(image_directory,files[i-ord('0')]))
     norm_size()
 
 
@@ -133,7 +133,7 @@ files = None
 
 def main():
     global image, fun, files
-    files = os.listdir(r'images')
+    files = os.listdir(image_directory)
     uploud(ord('0'))
     nimg = image.copy()
     cv2.createTrackbar('low', 'obrazek', 0, 255, change_h)
