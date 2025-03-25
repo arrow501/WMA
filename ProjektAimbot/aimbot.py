@@ -11,6 +11,7 @@ current_frame_index = 0
 frame_sampling_rate = 1  
 
 def load(skip_frames=30): # Load every 30th frame by default
+    """Load frames from the video file."""
     global frames, frame_sampling_rate
     frame_sampling_rate = skip_frames
     
@@ -39,6 +40,7 @@ def load(skip_frames=30): # Load every 30th frame by default
     return True
 
 def get_next_frame():
+    """Get the next frame in the list."""
     global current_frame_index
     if not frames or current_frame_index >= len(frames) - 1:
         return None
@@ -47,6 +49,7 @@ def get_next_frame():
     return frames[current_frame_index]
 
 def get_prev_frame():
+    """Get the previous frame in the list."""
     global current_frame_index
     if not frames or current_frame_index <= 0:
         return None
@@ -55,6 +58,7 @@ def get_prev_frame():
     return frames[current_frame_index]
 
 def resize_frame(frame, width, height):
+    """Resize the frame to the specified dimensions."""
     if frame is None:
         return None
     
@@ -83,16 +87,7 @@ def resize_frame(frame, width, height):
     return resized
 
 def overlay_on_bw(raw_frame, mask):
-    """
-    Create a grayscale background with colored elements based on a mask.
-    
-    Args:
-        raw_frame: Original colored frame
-        mask: Binary mask where white areas will be colored in the output
-        
-    Returns:
-        Frame with grayscale background and colored foreground elements
-    """
+    """Overlay the colored object on a black and white background."""
     # Create a black and white background    
     bw_frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
     # Convert the bw_frame back to BGR format (3-channel grayscale)
@@ -135,6 +130,7 @@ def draw_crosshair(frame, center, size=10, color=(0, 255, 0), thickness=2):
 
 
 def mask_ball(hsv_frame):
+    """Create a binary mask for the red ball."""
      # Define Ranges and create color masks for the main red ball
     lower_red_midtone = np.array([0, 100, 100])
     upper_red_midtone = np.array([5, 255, 255])
@@ -150,6 +146,7 @@ def mask_ball(hsv_frame):
 
 
 def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw_crosshair_flag=True, use_bw_background=True, blur_strength=18):
+    '''Process a single frame through the image processing pipeline.'''
     if raw_frame is None:
         return None, {}
     
@@ -211,6 +208,7 @@ def process_frame(raw_frame, draw_contours_flag=False, draw_bbox_flag=True, draw
     return frame, results
 
 def create_gui():
+    """Create the main GUI window."""
     global current_frame_index
     
     # Create the main window
