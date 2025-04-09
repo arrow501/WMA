@@ -5,17 +5,26 @@ import tkinter as tk
 from PIL import Image, ImageTk
 
 # Globals
-image_dir_path = "CW05-CoinCounter/pliki"
-
+IMAGE_DIR_PATH = "CW05-CoinCounter/pliki"
+COIN_SIZE_THRESHOLD = 1.8  # Percentage of tray area
 
 class CoinDetector:
     """Handles coin and tray detection in images"""
     
+    def __init__(self):
+        self.reset()
+    
+    def reset(self):
+        """Reset detection results"""
+        self.coins_on_tray = []  # [(center, radius, is_large)]
+        self.coins_off_tray = []  # [(center, radius, is_large)]
+        self.tray = None
+        self.tray_area = 0
+    
     def process(self, image):
         """Process image to detect coins and tray"""
         # Reset results
-        self.coins_on_tray = []
-        self.coins_off_tray = []
+        self.reset()
         result = image.copy()
         
         # FIRST PIPELINE: Detect on-tray coins and tray
@@ -33,36 +42,49 @@ class CoinDetector:
         # 3. Detect tray using the weighted image
         self.tray = self._detect_tray(weighted_gray)
         
-        # 4. Detect on-tray coins
+        # 4. Calculate tray area if tray was found
+        if self.tray is not None:
+            self.tray_area = cv2.contourArea(self.tray)
+        
+        # 5. Detect on-tray coins
         on_tray_circles = cv2.HoughCircles(
             gray_tray, cv2.HOUGH_GRADIENT, dp=1, minDist=36,
             param1=51, param2=38, minRadius=10, maxRadius=0
         )
         
         # SECOND PIPELINE: Detect all coins, filter to get off-tray coins
-        # 5. Process original image without weighted grayscale
+        # 6. Process original image without weighted grayscale
         processed_all = self._enhance_image(image)
         gray_all = cv2.cvtColor(processed_all, cv2.COLOR_BGR2GRAY)
         
-        # 6. Detect all coins
+        # 7. Detect all coins
         all_circles = cv2.HoughCircles(
             gray_all, cv2.HOUGH_GRADIENT, dp=1, minDist=36,
             param1=51, param2=38, minRadius=10, maxRadius=0
         )
         
-        # 7. Mark on-tray coins
+        # 8. Mark on-tray coins
         if on_tray_circles is not None:
             on_tray_circles = np.uint16(np.around(on_tray_circles))
             for circle in on_tray_circles[0, :]:
                 center = (int(circle[0]), int(circle[1]))
                 radius = int(circle[2])
-                self.coins_on_tray.append((center, radius))
                 
-                # Draw in green
-                cv2.circle(result, center, radius, (0, 255, 0), 2)
-                cv2.circle(result, center, 2, (0, 255, 0), 3)
+                # Classify coin size
+                is_large = self._is_large_coin(radius)
+                self.coins_on_tray.append((center, radius, is_large))
+                
+                # Color based on coin size
+                if is_large:
+                    # Green for large coins on tray (5zł)
+                    cv2.circle(result, center, radius, (0, 255, 0), 2)
+                    cv2.circle(result, center, 2, (0, 255, 0), 3)
+                else:
+                    # Light blue for small coins on tray (5gr)
+                    cv2.circle(result, center, radius, (255, 191, 0), 2)
+                    cv2.circle(result, center, 2, (255, 191, 0), 3)
         
-        # 8. Filter and mark off-tray coins
+        # 9. Filter and mark off-tray coins
         if all_circles is not None and self.tray is not None:
             all_circles = np.uint16(np.around(all_circles))
             for circle in all_circles[0, :]:
@@ -71,13 +93,21 @@ class CoinDetector:
                 
                 # Only include coins not on tray
                 if not self._is_on_tray(center):
-                    self.coins_off_tray.append((center, radius))
+                    # Classify coin size
+                    is_large = self._is_large_coin(radius)
+                    self.coins_off_tray.append((center, radius, is_large))
                     
-                    # Draw in red
-                    cv2.circle(result, center, radius, (0, 0, 255), 2)
-                    cv2.circle(result, center, 2, (0, 0, 255), 3)
+                    # Color based on coin size
+                    if is_large:
+                        # Red for large coins off tray (5zł)
+                        cv2.circle(result, center, radius, (0, 0, 255), 2)
+                        cv2.circle(result, center, 2, (0, 0, 255), 3)
+                    else:
+                        # Yellow for small coins off tray (5gr)
+                        cv2.circle(result, center, radius, (0, 255, 255), 2)
+                        cv2.circle(result, center, 2, (0, 255, 255), 3)
         
-        # 9. Draw tray contour
+        # 10. Draw tray contour
         if self.tray is not None:
             cv2.drawContours(result, [self.tray], 0, (255, 0, 0), 2)  # Blue for tray
         
@@ -121,14 +151,52 @@ class CoinDetector:
             return False
         return cv2.pointPolygonTest(self.tray, point, False) >= 0
     
+    def get_coin_area(self, radius):
+        """Calculate coin area in pixels"""
+        return np.pi * radius * radius
+    
+    def _is_large_coin(self, radius):
+        """Determine if this is a large coin (5zł) based on radius"""
+        if self.tray_area > 0:
+            # Calculate coin area as percentage of tray area
+            coin_area = self.get_coin_area(radius)
+            coin_percentage = (coin_area / self.tray_area) * 100
+            return coin_percentage > COIN_SIZE_THRESHOLD
+        return radius > 30  # fallback for no tray
+    
+    def get_tray_area(self):
+        """Get the area of the detected tray"""
+        return self.tray_area
+    
     def get_counts(self):
-        """Get coin counts"""
-        return len(self.coins_on_tray), len(self.coins_off_tray)
+        """Get detailed coin counts and values"""
+        # Count coins by type and location
+        small_on_tray = sum(1 for _, _, is_large in self.coins_on_tray if not is_large)
+        large_on_tray = sum(1 for _, _, is_large in self.coins_on_tray if is_large)
+        small_off_tray = sum(1 for _, _, is_large in self.coins_off_tray if not is_large)
+        large_off_tray = sum(1 for _, _, is_large in self.coins_off_tray if is_large)
+        
+        # Calculate values (5gr = 0.05 PLN, 5zł = 5 PLN)
+        value_on_tray = small_on_tray * 0.05 + large_on_tray * 5.0
+        value_off_tray = small_off_tray * 0.05 + large_off_tray * 5.0
+        total_value = value_on_tray + value_off_tray
+        
+        return {
+            "small_on_tray": small_on_tray,
+            "large_on_tray": large_on_tray,
+            "small_off_tray": small_off_tray,
+            "large_off_tray": large_off_tray,
+            "total_on_tray": small_on_tray + large_on_tray,
+            "total_off_tray": small_off_tray + large_off_tray,
+            "value_on_tray": value_on_tray,
+            "value_off_tray": value_off_tray,
+            "total_value": total_value
+        }
 
 class CoinCounterApp:
     """GUI application for coin counting"""
     
-    def __init__(self, image_dir):
+    def __init__(self, image_dir=IMAGE_DIR_PATH):
         self.image_dir = image_dir
         self.images = []
         self.current_index = 0
@@ -167,11 +235,37 @@ class CoinCounterApp:
         controls = tk.Frame(self.root)
         controls.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # Navigation buttons
-        tk.Button(controls, text="Previous", 
-                 command=lambda: self.show_image(self.current_index - 1)).pack(side=tk.LEFT, padx=10)
-        tk.Button(controls, text="Next", 
-                 command=lambda: self.show_image(self.current_index + 1)).pack(side=tk.RIGHT, padx=10)
+        # Status bars for coin counts in horizontal layout
+        status_frame = tk.Frame(controls)
+        status_frame.pack(fill=tk.X, padx=10, pady=2)
+        
+        # Using a horizontal layout with three columns
+        col_width = 33  # Percentage width for each column
+        
+        # First row - labels
+        tk.Label(status_frame, text="ON TRAY", font=("Arial", 9, "bold"), 
+                bg="#e6ffe6", width=col_width, bd=1, relief=tk.GROOVE).grid(row=0, column=0, sticky="ew", padx=1)
+        tk.Label(status_frame, text="OFF TRAY", font=("Arial", 9, "bold"), 
+                bg="#ffebeb", width=col_width, bd=1, relief=tk.GROOVE).grid(row=0, column=1, sticky="ew", padx=1)
+        tk.Label(status_frame, text="ALL COINS", font=("Arial", 9, "bold"), 
+                bg="#e6f2ff", width=col_width, bd=1, relief=tk.GROOVE).grid(row=0, column=2, sticky="ew", padx=1)
+        
+        # Second row - values
+        self.on_tray_status = tk.StringVar()
+        tk.Label(status_frame, textvariable=self.on_tray_status, 
+                bg="#e6ffe6", width=col_width, bd=1, relief=tk.GROOVE).grid(row=1, column=0, sticky="ew", padx=1)
+        
+        self.off_tray_status = tk.StringVar()
+        tk.Label(status_frame, textvariable=self.off_tray_status,
+                bg="#ffebeb", width=col_width, bd=1, relief=tk.GROOVE).grid(row=1, column=1, sticky="ew", padx=1)
+        
+        self.all_coins_status = tk.StringVar()
+        tk.Label(status_frame, textvariable=self.all_coins_status,
+                bg="#e6f2ff", width=col_width, bd=1, relief=tk.GROOVE).grid(row=1, column=2, sticky="ew", padx=1)
+        
+        # Configure grid column weights
+        for i in range(3):
+            status_frame.columnconfigure(i, weight=1)
         
         # Image slider
         self.slider = tk.Scale(controls, from_=0, to=len(self.images)-1,
@@ -179,7 +273,7 @@ class CoinCounterApp:
                               command=lambda v: self.show_image(int(v)))
         self.slider.pack(fill=tk.X, padx=10, pady=5)
         
-        # Status bar
+        # Main status bar at the bottom
         self.status = tk.StringVar()
         tk.Label(controls, textvariable=self.status, 
                 bd=1, relief=tk.SUNKEN, anchor=tk.W).pack(side=tk.BOTTOM, fill=tk.X)
@@ -224,11 +318,44 @@ class CoinCounterApp:
         self.canvas.create_image(width//2, height//2, image=tk_img, anchor=tk.CENTER)
         self.canvas.image = tk_img  # Keep reference to prevent garbage collection
         
-        # Update status
-        on_tray, off_tray = self.detector.get_counts()
+        # Get and update coin counts
+        counts = self.detector.get_counts()
+        
+        # Update status bars
+        self.on_tray_status.set(
+            f"{counts['small_on_tray']} × 5gr + {counts['large_on_tray']} × 5zł = {counts['value_on_tray']:.2f} PLN"
+        )
+        
+        self.off_tray_status.set(
+            f"{counts['small_off_tray']} × 5gr + {counts['large_off_tray']} × 5zł = {counts['value_off_tray']:.2f} PLN"
+        )
+        
+        self.all_coins_status.set(
+            f"{counts['small_on_tray'] + counts['small_off_tray']} × 5gr + "
+            f"{counts['large_on_tray'] + counts['large_off_tray']} × 5zł = {counts['total_value']:.2f} PLN"
+        )
+        
+        # Find coin areas (just get any sample of each type)
+        small_area = 0
+        large_area = 0
+        
+        # Check for any small and large coins
+        for center, radius, is_large in self.detector.coins_on_tray + self.detector.coins_off_tray:
+            if is_large and large_area == 0:
+                large_area = self.detector.get_coin_area(radius)
+            if not is_large and small_area == 0:
+                small_area = self.detector.get_coin_area(radius)
+            if small_area > 0 and large_area > 0:
+                break
+        
+        # Update status with tray area and coin areas
+        tray_area = self.detector.get_tray_area()
         self.status.set(
             f"Image {self.current_index + 1} of {len(self.images)} | "
-            f"Coins on tray: {on_tray} | Coins off tray: {off_tray}"
+            f"Tray Area: {tray_area:.0f} px² | "
+            f"5gr Coin Area: {small_area:.1f} px² | "
+            f"5zł Coin Area: {large_area:.1f} px² | "
+            f"Threshold: {COIN_SIZE_THRESHOLD}% of tray area"
         )
     
     def _resize_image(self, image, width, height):
@@ -248,5 +375,5 @@ class CoinCounterApp:
         self.root.mainloop()
 
 if __name__ == "__main__":
-    app = CoinCounterApp(image_dir_path)
+    app = CoinCounterApp()
     app.run()
