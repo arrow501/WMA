@@ -6,7 +6,7 @@ import os
 image = None
 fun = None
 files = None
-path_pliki = r'CW05\pliki'
+path_pliki = "CW05-CoinCounter/pliki"
 
 def uploud(i):
     global files, image

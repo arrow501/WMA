@@ -6,7 +6,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 
 # Global variables
-image_directory = "CW05/pliki"
+image_directory = "CW05-CoinCounter/pliki"
 images = []
 current_image_index = 0
 
