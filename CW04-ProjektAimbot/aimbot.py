@@ -4,8 +4,8 @@ import tkinter as tk
 from PIL import Image, ImageTk
 
 
-ball_video_path = r'./CW05-ProjektAimbot/movingball.mp4'
-notebook_video_path = r'./CW05-ProjektAimbot/fluorescent_notebook.mp4'
+ball_video_path = r'./CW04-ProjektAimbot/movingball.mp4'
+notebook_video_path = r'./CW04-ProjektAimbot/fluorescent_notebook.mp4'
 
 # Global variables
 frames = []
