@@ -2,7 +2,7 @@
 
 This repository contains various computer vision projects and exercises.
 
-Not all code is my own, some has been given to me by the teacher to do as I please.
+Not all code is my own, some has been given to me by the teacher to do with as I please.
 
 ## Setup Instructions
 
