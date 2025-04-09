@@ -9,6 +9,9 @@ image_directory = "CW05-CoinCounter/pliki"
 images = []
 current_image_index = 0
 
+Coins = { 'onTray': {}, 'offTray': {} }
+Tray = {}
+
 def load_images():
     global images
     for filename in os.listdir(image_directory):
@@ -45,7 +48,7 @@ def resize_frame(frame, width, height):
     return resized
 
 def detect_coins(image, onTray=True):
-    """Apply the coin detection preset and return image with coin markings"""
+    """Process image to detect coins and return processed image and detected circles"""
     result = image.copy()
     
     # Process grayscale differently depending on whether coins are on tray
@@ -68,9 +71,13 @@ def detect_coins(image, onTray=True):
         # Convert to 3-channel grayscale
         processed = cv2.cvtColor(weighted_sum, cv2.COLOR_GRAY2BGR)
         
+        # Save the weighted sum for tray detection
+        gray_processed = weighted_sum
+        
     else:
         # For non-tray mode, still apply contrast enhancement to match original behavior
         processed = result.copy()
+        gray_processed = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
 
     processed_float = processed.astype(np.float32) / 255.0
     processed_float = 0.5 + 2.0 * (processed_float - 0.5)  # Apply contrast level 2.0 as in preset
@@ -101,16 +108,144 @@ def detect_coins(image, onTray=True):
         maxRadius=0
     )
     
-    # Draw circles on the original image
-    if circles is not None:
-        circles = np.uint16(np.around(circles))
-        for i in circles[0, :]:
-            # Draw circle outline
-            cv2.circle(result, (i[0], i[1]), i[2], (0, 255, 0), 2)
-            # Draw circle center
-            cv2.circle(result, (i[0], i[1]), 2, (0, 0, 255), 3)
+    # Return the processed image and detected circles
+    return processed, gray_processed, circles
+
+def detect_tray(gray_image):
+    """Detect tray in the processed grayscale image and return its bounding box"""
+    # Apply threshold to isolate the tray (which appears almost white)
+    _, thresh = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY)
+    
+    # Find contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # If no contours found, return empty dictionary
+    if not contours:
+        return {}
+    
+    # Find the largest contour (which should be the tray)
+    largest_contour = max(contours, key=cv2.contourArea)
+    
+    # Get bounding rectangle
+    x, y, w, h = cv2.boundingRect(largest_contour)
+    
+    # Return the tray information
+    return {
+        'x': x,
+        'y': y,
+        'width': w,
+        'height': h,
+        'contour': largest_contour
+    }
+
+def is_point_inside_tray(point, tray):
+    """Check if point (x, y) is inside the tray bounding box"""
+    if not tray:
+        return False
+    x, y = point
+    return (tray['x'] <= x <= tray['x'] + tray['width'] and 
+            tray['y'] <= y <= tray['y'] + tray['height'])
+
+def mark_coins(image, on_tray_circles, off_tray_circles, tray):
+    """Mark coins and tray on the image"""
+    result = image.copy()
+    
+    # Draw tray bounding box if detected
+    if tray and 'x' in tray:
+        cv2.rectangle(result, 
+                     (tray['x'], tray['y']), 
+                     (tray['x'] + tray['width'], tray['y'] + tray['height']), 
+                     (255, 0, 0), 2)  # Blue rectangle
+    
+    # Draw on-tray circles
+    if on_tray_circles is not None:
+        on_tray_circles = np.uint16(np.around(on_tray_circles))
+        for i in on_tray_circles[0, :]:
+            center = (int(i[0]), int(i[1]))
+            radius = int(i[2])
+            
+            # Green for coins on tray
+            cv2.circle(result, center, radius, (0, 255, 0), 2)  # Circle outline
+            cv2.circle(result, center, 2, (0, 255, 0), 3)  # Circle center
+    
+    # Draw off-tray circles
+    if off_tray_circles is not None:
+        off_tray_circles = np.uint16(np.around(off_tray_circles))
+        for i in off_tray_circles[0, :]:
+            center = (int(i[0]), int(i[1]))
+            radius = int(i[2])
+            
+            # Red for coins off tray
+            cv2.circle(result, center, radius, (0, 0, 255), 2)  # Circle outline
+            cv2.circle(result, center, 2, (0, 0, 255), 3)  # Circle center
     
     return result
+
+def coin_pipeline(image):
+    """Main coin detection pipeline"""
+    global Coins, Tray
+    
+    # Clear previous data
+    Coins['onTray'] = {}
+    Coins['offTray'] = {}
+    
+    # Step 1: Detect coins on tray and get processed image for tray detection
+    processed, gray_processed, _ = detect_coins(image, onTray=True)
+    
+    # Step 2: Detect tray using the processed image
+    Tray = detect_tray(gray_processed)
+    
+    # Step 3: Detect coins on tray (specialized detection for on-tray coins)
+    _, _, on_tray_circles = detect_coins(image, onTray=True)
+    
+    # Step 4: Detect all coins (will include both on and off tray)
+    _, _, all_circles = detect_coins(image, onTray=False)
+    
+    # Step 5: Filter to get only off-tray coins
+    off_tray_circles = None
+    if all_circles is not None:
+        # Convert to numpy arrays
+        all_circles_arr = np.uint16(np.around(all_circles))
+        
+        # Create a filtered list for off-tray coins
+        off_tray_list = []
+        
+        for circle in all_circles_arr[0, :]:
+            center = (int(circle[0]), int(circle[1]))
+            # If center is outside tray, add to off_tray_list
+            if not is_point_inside_tray(center, Tray):
+                off_tray_list.append(circle)
+        
+        # Convert filtered list back to proper format if not empty
+        if off_tray_list:
+            # Fix: Create the correct shape array (1, n, 3) that matches HoughCircles output
+            off_tray_circles = np.array([off_tray_list], dtype=np.float32)
+    
+    # Step 6: Populate Coins dictionaries
+    if on_tray_circles is not None:
+        on_tray_circles_arr = np.uint16(np.around(on_tray_circles))
+        for idx, circle in enumerate(on_tray_circles_arr[0, :]):
+            center = (int(circle[0]), int(circle[1]))
+            radius = int(circle[2])
+            Coins['onTray'][idx] = {
+                'center': center,
+                'radius': radius
+            }
+    
+    if off_tray_circles is not None:
+        off_tray_circles_arr = np.uint16(np.around(off_tray_circles))
+        for idx, circle in enumerate(off_tray_circles_arr[0, :]):
+            center = (int(circle[0]), int(circle[1]))
+            radius = int(circle[2])
+            Coins['offTray'][idx] = {
+                'center': center,
+                'radius': radius
+            }
+    
+    # Step 7: Mark up the image with coins and tray
+    marked_image = mark_coins(image, on_tray_circles, off_tray_circles, Tray)
+    
+    return marked_image
 
 def create_gui():
     global current_image_index
@@ -190,8 +325,8 @@ def create_gui():
         # Get the image
         image = images[current_image_index].copy()
         
-        # Apply coin detection
-        processed_image = detect_coins(image)
+        # Apply coin pipeline
+        processed_image = coin_pipeline(image)
         
         # Resize for display
         display_image = resize_frame(processed_image, canvas_width, canvas_height)
@@ -208,8 +343,10 @@ def create_gui():
         canvas.create_image(canvas_width//2, canvas_height//2, image=img_tk, anchor=tk.CENTER)
         canvas.image = img_tk  # Keep a reference to prevent garbage collection
         
-        # Update status
-        status_var.set(f"Image {current_image_index + 1} of {len(images)}")
+        # Update status with coin counts
+        status_var.set(f"Image {current_image_index + 1} of {len(images)} | "
+                      f"Coins on tray: {len(Coins['onTray'])} | "
+                      f"Coins off tray: {len(Coins['offTray'])}")
     
     # Key bindings for navigation
     def key_handler(event):
