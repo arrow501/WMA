@@ -40,6 +40,7 @@ source .venv/bin/activate
 
 **Windows PowerShell:**
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .venv\Scripts\Activate.ps1
 ```
 
