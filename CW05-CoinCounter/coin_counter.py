@@ -51,7 +51,7 @@ def detect_coins(image, onTray=True):
     """Process image to detect coins and return processed image and detected circles"""
     result = image.copy()
     
-    # Process grayscale differently depending on whether coins are on tray
+    # Process grayscale differently depending on whether detecting coins on tray
     if onTray:
         # Convert to grayscale with custom weights
         b, g, r = cv2.split(result)
@@ -75,20 +75,20 @@ def detect_coins(image, onTray=True):
         gray_processed = weighted_sum
         
     else:
-        # For non-tray mode, still apply contrast enhancement to match original behavior
+        # For non-tray mode skip the custom grayscale processing
         processed = result.copy()
         gray_processed = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
 
     processed_float = processed.astype(np.float32) / 255.0
-    processed_float = 0.5 + 2.0 * (processed_float - 0.5)  # Apply contrast level 2.0 as in preset
+    processed_float = 0.5 + 2.0 * (processed_float - 0.5)  # Apply contrast level 2.0 
     processed_float = np.clip(processed_float, 0, 1)
     processed = (processed_float * 255).astype(np.uint8)
     
-    # Apply blur
+    # Apply blur level 5
     k_size = 11  # 5*2+1
     processed = cv2.GaussianBlur(processed, (k_size, k_size), 0)
     
-    # Apply morphological closing
+    # Apply morphological closing level 5
     k_size = 11  # 5*2+1
     kernel = np.ones((k_size, k_size), np.uint8)
     processed = cv2.morphologyEx(processed, cv2.MORPH_CLOSE, kernel)
@@ -113,8 +113,13 @@ def detect_coins(image, onTray=True):
 
 def detect_tray(gray_image):
     """Detect tray in the processed grayscale image and return its bounding box"""
-    # Apply threshold to isolate the tray (which appears almost white)
-    _, thresh = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY)
+    # Apply threshold to isolate the tray, almost white
+    _, thresh = cv2.threshold(gray_image, 200, 200, cv2.THRESH_BINARY)
+
+    # Apply morphological operations to clean up the image
+    kernel = np.ones((17,17), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
     
     # Find contours
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -139,19 +144,22 @@ def detect_tray(gray_image):
     }
 
 def is_point_inside_tray(point, tray):
-    """Check if point (x, y) is inside the tray bounding box"""
+    """Check if point (x, y) is inside the tray contour"""
     if not tray:
         return False
-    x, y = point
-    return (tray['x'] <= x <= tray['x'] + tray['width'] and 
-            tray['y'] <= y <= tray['y'] + tray['height'])
+    result = cv2.pointPolygonTest(tray['contour'], point, False)
+    return result >= 0  # True if point is inside or on the contour
 
 def mark_coins(image, on_tray_circles, off_tray_circles, tray):
     """Mark coins and tray on the image"""
     result = image.copy()
     
-    # Draw tray bounding box if detected
-    if tray and 'x' in tray:
+    # Draw tray contour if detected
+    if tray and 'contour' in tray:
+        # Draw the contour in blue
+        cv2.drawContours(result, [tray['contour']], 0, (255, 0, 0), 2)
+    # Fallback to bounding box if contour is not available
+    elif tray and 'x' in tray:
         cv2.rectangle(result, 
                      (tray['x'], tray['y']), 
                      (tray['x'] + tray['width'], tray['y'] + tray['height']), 
@@ -212,13 +220,12 @@ def coin_pipeline(image):
         
         for circle in all_circles_arr[0, :]:
             center = (int(circle[0]), int(circle[1]))
-            # If center is outside tray, add to off_tray_list
+            # If center is outside tray contour, add to off_tray_list
             if not is_point_inside_tray(center, Tray):
                 off_tray_list.append(circle)
         
         # Convert filtered list back to proper format if not empty
         if off_tray_list:
-            # Fix: Create the correct shape array (1, n, 3) that matches HoughCircles output
             off_tray_circles = np.array([off_tray_list], dtype=np.float32)
     
     # Step 6: Populate Coins dictionaries
