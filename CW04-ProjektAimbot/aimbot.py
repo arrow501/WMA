@@ -10,7 +10,7 @@ notebook_video_path = r'./CW04-ProjektAimbot/fluorescent_notebook.mp4'
 # Global variables
 frames = []
 current_frame_index = 0
-frame_sampling_rate = 30
+frame_sampling_rate = 1
 current_video_type = 'ball'  # Default to ball video
 
 def load(video_path, skip_frames=30): # Load every 30th frame by default
