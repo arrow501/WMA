@@ -116,7 +116,7 @@ def detect_tray(gray_image):
     # Apply threshold to isolate the tray, almost white
     _, thresh = cv2.threshold(gray_image, 200, 200, cv2.THRESH_BINARY)
 
-    # Apply morphological operations to clean up the image
+    # Apply morphological operations for a cleaner contour 
     kernel = np.ones((17,17), np.uint8)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
@@ -198,18 +198,15 @@ def coin_pipeline(image):
     Coins['offTray'] = {}
     
     # Step 1: Detect coins on tray and get processed image for tray detection
-    processed, gray_processed, _ = detect_coins(image, onTray=True)
+    processed, gray_processed, on_tray_circles = detect_coins(image, onTray=True)
     
     # Step 2: Detect tray using the processed image
     Tray = detect_tray(gray_processed)
     
-    # Step 3: Detect coins on tray (specialized detection for on-tray coins)
-    _, _, on_tray_circles = detect_coins(image, onTray=True)
-    
-    # Step 4: Detect all coins (will include both on and off tray)
+    # Step 3: Detect all coins (will include both on and off tray)
     _, _, all_circles = detect_coins(image, onTray=False)
     
-    # Step 5: Filter to get only off-tray coins
+    # Step 4: Filter to get only off-tray coins
     off_tray_circles = None
     if all_circles is not None:
         # Convert to numpy arrays
@@ -228,7 +225,7 @@ def coin_pipeline(image):
         if off_tray_list:
             off_tray_circles = np.array([off_tray_list], dtype=np.float32)
     
-    # Step 6: Populate Coins dictionaries
+    # Step 5: Populate Coins dictionaries
     if on_tray_circles is not None:
         on_tray_circles_arr = np.uint16(np.around(on_tray_circles))
         for idx, circle in enumerate(on_tray_circles_arr[0, :]):
@@ -249,7 +246,7 @@ def coin_pipeline(image):
                 'radius': radius
             }
     
-    # Step 7: Mark up the image with coins and tray
+    # Step 6: Mark up the image with coins and tray
     marked_image = mark_coins(image, on_tray_circles, off_tray_circles, Tray)
     
     return marked_image
