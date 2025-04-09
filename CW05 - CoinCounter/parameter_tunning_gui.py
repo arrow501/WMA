@@ -190,7 +190,7 @@ def create_gui():
     
     # Create the main window
     root = tk.Tk()
-    root.title("Coin Counter - Image Viewer")
+    root.title("Coin Counter - Processing Tuning")
     
     # Set window size
     window_width = 1200
@@ -391,11 +391,81 @@ def create_gui():
     btn_frame = tk.Frame(controls_frame)
     btn_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
     
-    prev_btn = tk.Button(btn_frame, text="Previous", command=lambda: show_image(current_image_index - 1))
-    prev_btn.pack(side=tk.LEFT, padx=10)
+    # Navigation buttons (left side)
+    nav_left_frame = tk.Frame(btn_frame)
+    nav_left_frame.pack(side=tk.LEFT, padx=10)
     
-    next_btn = tk.Button(btn_frame, text="Next", command=lambda: show_image(current_image_index + 1))
-    next_btn.pack(side=tk.RIGHT, padx=10)
+    prev_btn = tk.Button(nav_left_frame, text="Previous", command=lambda: show_image(current_image_index - 1))
+    prev_btn.pack(side=tk.LEFT)
+    
+    # Preset buttons (center)
+    presets_frame = tk.Frame(btn_frame)
+    presets_frame.pack(side=tk.LEFT, expand=True, fill=tk.X)
+    
+    # Function to create preset buttons
+    def create_preset_button(title, settings_dict):
+        def apply_preset():
+            # Apply all settings from the dictionary - use variable names directly
+            for setter_func, value in settings_dict:
+                setter_func(value)
+            show_image()
+        
+        # Create the button directly in presets_frame and pack it side-by-side (LEFT)
+        btn = tk.Button(presets_frame, text=title, command=apply_preset,
+                       bg="#e0e0ff", font=("Arial", 9, "bold"))
+        btn.pack(side=tk.LEFT, padx=5, pady=2)
+        return btn
+    
+    # Coin detection preset
+    coin_preset_settings = [
+        (grayscale_var.set, True),
+        (grayscale_gain_var.set, 3.0),
+        (r_weight_var.set, 1.0),
+        (g_weight_var.set, -1.0),
+        (b_weight_var.set, -0.9),
+        (contrast_var.set, True),
+        (contrast_slider_var.set, 2.0),
+        (blur_var.set, True),
+        (blur_slider_var.set, 5),
+        (closing_var.set, True),
+        (closing_slider_var.set, 5),
+        (opening_var.set, False),
+        (circle_detection_var.set, True),
+        (min_dist_var.set, 36),
+        (param1_var.set, 51),
+        (param2_var.set, 38)
+    ]
+    
+    coin_preset_btn = create_preset_button("Coins on Tray", coin_preset_settings)
+    
+    # Add a new preset for coins off tray - identical but without grayscale
+    coins_off_tray_settings = [
+        (grayscale_var.set, False),  # The only difference: grayscale disabled
+        (grayscale_gain_var.set, 3.0),
+        (r_weight_var.set, 1.0),
+        (g_weight_var.set, -1.0),
+        (b_weight_var.set, -0.9),
+        (contrast_var.set, True),
+        (contrast_slider_var.set, 2.0),
+        (blur_var.set, True),
+        (blur_slider_var.set, 5),
+        (closing_var.set, True),
+        (closing_slider_var.set, 5),
+        (opening_var.set, False),
+        (circle_detection_var.set, True),
+        (min_dist_var.set, 36),
+        (param1_var.set, 51),
+        (param2_var.set, 38)
+    ]
+    
+    coins_off_tray_btn = create_preset_button("Coins Off Tray", coins_off_tray_settings)
+    
+    # Navigation buttons (right side)
+    nav_right_frame = tk.Frame(btn_frame)
+    nav_right_frame.pack(side=tk.RIGHT, padx=10)
+    
+    next_btn = tk.Button(nav_right_frame, text="Next", command=lambda: show_image(current_image_index + 1))
+    next_btn.pack(side=tk.RIGHT)
     
     # Image slider
     image_slider = tk.Scale(controls_frame, from_=0, to=len(images)-1 if images else 0,
