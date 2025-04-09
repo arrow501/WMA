@@ -2,7 +2,6 @@ import cv2
 import matplotlib as mpl  # Import matplotlib itself for version
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 import tkinter as tk
 
 print("OpenCV version:", cv2.__version__)
