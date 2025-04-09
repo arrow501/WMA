@@ -197,6 +197,31 @@ def create_gui():
     window_height = 800
     root.geometry(f"{window_width}x{window_height}")
     
+    # Define all control variables
+    grayscale_var = tk.BooleanVar(value=enable_grayscale)
+    grayscale_gain_var = tk.DoubleVar(value=grayscale_gain)
+    r_weight_var = tk.DoubleVar(value=r_weight)
+    g_weight_var = tk.DoubleVar(value=g_weight)
+    b_weight_var = tk.DoubleVar(value=b_weight)
+    
+    contrast_var = tk.BooleanVar(value=enable_contrast)
+    contrast_slider_var = tk.DoubleVar(value=contrast_level)
+    sharpen_var = tk.BooleanVar(value=enable_sharpen)
+    sharpen_slider_var = tk.DoubleVar(value=sharpen_amount)
+    
+    blur_var = tk.BooleanVar(value=enable_blur)
+    blur_slider_var = tk.IntVar(value=blur_amount)
+    
+    closing_var = tk.BooleanVar(value=enable_closing)
+    closing_slider_var = tk.IntVar(value=closing_size)
+    opening_var = tk.BooleanVar(value=enable_opening)
+    opening_slider_var = tk.IntVar(value=opening_size)
+    
+    circle_detection_var = tk.BooleanVar(value=enable_circle_detection)
+    min_dist_var = tk.IntVar(value=min_circle_dist)
+    param1_var = tk.IntVar(value=circle_param1)
+    param2_var = tk.IntVar(value=circle_param2)
+    
     # Main content frame
     main_content = tk.Frame(root)
     main_content.pack(fill=tk.BOTH, expand=True)
