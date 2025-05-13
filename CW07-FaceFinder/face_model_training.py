@@ -21,30 +21,33 @@ OUTPUT_DIR = 'CW07-FaceFinder/model'
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
 INITIAL_LEARNING_RATE = 0.001
-FINE_TUNING_LEARNING_RATE = 0.00005
+FINE_TUNING_LEARNING_RATE = 0.0001  # Slightly higher than before
 
 # Training parameters
 EPOCHS = 30
 VALIDATION_SPLIT = 0.2
 RANDOM_STATE = 42
-EARLY_STOPPING_PATIENCE = 5
-FINE_TUNING_PATIENCE = 3
-PHASE1_EPOCHS_RATIO = 0.6
-PHASE2_EPOCHS_RATIO = 0.4
+EARLY_STOPPING_PATIENCE = 7  # Increased patience
+FINE_TUNING_PATIENCE = 5  # Increased patience for fine-tuning
+PHASE1_EPOCHS_RATIO = 0.5
+PHASE2_EPOCHS_RATIO = 0.5  # Equal split between phases
+
+# Regularization parameters
+DROPOUT_RATES = (0.3, 0.2)  # Reduced dropout rates
+FINE_TUNING_LAYERS = 25  # More layers to fine-tune
 
 # Data augmentation parameters
-ROTATION_RANGE = 20
-SHIFT_RANGE = 0.2
-SHEAR_RANGE = 0.2
-ZOOM_RANGE = 0.2
-BRIGHTNESS_RANGE = [0.8, 1.2]
-DROPOUT_RATE = 0.3
+ROTATION_RANGE = 15  # Reduced from 20
+SHIFT_RANGE = 0.15  # Reduced from 0.2
+SHEAR_RANGE = 0.15  # Reduced from 0.2
+ZOOM_RANGE = 0.15  # Reduced from 0.2
+BRIGHTNESS_RANGE = [0.85, 1.15]  # Less extreme
 
 
 class FaceModelTrainer:
     """Class for training a face recognition model"""
     
-    def __init__(self, data_dir, output_dir, img_size=IMG_SIZE, batch_size=BATCH_SIZE):
+    def __init__(self, data_dir=DATA_DIR, output_dir=OUTPUT_DIR, img_size=IMG_SIZE, batch_size=BATCH_SIZE):
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.img_size = img_size
@@ -133,8 +136,18 @@ class FaceModelTrainer:
         # Compute class weights (for handling imbalance)
         class_counts = np.bincount(y_encoded)
         total = np.sum(class_counts)
-        self.class_weights = {i: total / (len(class_counts) * count) 
+        
+        # Apply square root to smooth out extreme weights
+        # This helps prevent catastrophic forgetting for minority classes
+        # while not over-penalizing the majority class
+        smoothed_counts = np.sqrt(class_counts)
+        self.class_weights = {i: total / (len(class_counts) * smoothed_counts[i] * np.sum(smoothed_counts) / total) 
                              for i, count in enumerate(class_counts)}
+        
+        # Print class weights
+        print("Class weights:")
+        for i, class_name in enumerate(self.label_encoder.classes_):
+            print(f"  {class_name}: {self.class_weights[i]:.4f}")
         
         return X_train, X_val, y_train, y_val
     
@@ -151,14 +164,14 @@ class FaceModelTrainer:
         for layer in base_model.layers:
             layer.trainable = False
         
-        # Create model
+        # Create model with less aggressive regularization
         model = models.Sequential([
             base_model,
             layers.GlobalAveragePooling2D(),
             layers.Dense(256, activation='relu'),
-            layers.Dropout(0.5),
+            layers.Dropout(DROPOUT_RATES[0]),  # Reduced dropout
             layers.Dense(128, activation='relu'),
-            layers.Dropout(0.3),
+            layers.Dropout(DROPOUT_RATES[1]),  # Reduced dropout
             layers.Dense(num_classes, activation='softmax')
         ])
         
@@ -171,8 +184,8 @@ class FaceModelTrainer:
         
         return model
     
-    def train(self, epochs=20):
-        """Train the model with better overfitting prevention"""
+    def train(self, epochs=EPOCHS):
+        """Train the model with balanced regularization approach"""
         # Load data
         X_train, X_val, y_train, y_val = self.load_data()
         
@@ -180,11 +193,12 @@ class FaceModelTrainer:
         model = self.create_model(len(self.classes))
         model.summary()
         
-        # Improved callbacks
+        # Define callbacks
         early_stopping = EarlyStopping(
             monitor='val_accuracy', 
             patience=EARLY_STOPPING_PATIENCE,
-            restore_best_weights=True
+            restore_best_weights=True,
+            verbose=1
         )
         
         # Save best model during each phase
@@ -200,40 +214,39 @@ class FaceModelTrainer:
         history1 = model.fit(
             self.train_datagen.flow(X_train, y_train, batch_size=self.batch_size),
             validation_data=self.val_datagen.flow(X_val, y_val, batch_size=self.batch_size),
-            epochs=int(epochs * PHASE1_EPOCHS_RATIO),  # 60% of epochs for initial training
+            epochs=int(epochs * PHASE1_EPOCHS_RATIO),
             callbacks=[early_stopping, checkpoint],
-            class_weight=self.class_weights
+            class_weight=self.class_weights,
+            verbose=1
         )
         
         # Save best model from phase 1
         model.save(os.path.join(self.output_dir, 'phase1_model.h5'))
         
-        # Phase 2: Fine-tuning with more aggressive regularization
-        print("Phase 2: Fine-tuning with regularization...")
+        # Phase 2: Fine-tuning with balanced regularization
+        print("Phase 2: Fine-tuning with balanced regularization...")
         
-        # Unfreeze fewer layers (just last 15 instead of 20)
-        for layer in model.layers[0].layers[-15:]:
+        # Unfreeze more layers (25 instead of 15)
+        for layer in model.layers[0].layers[-FINE_TUNING_LAYERS:]:
             layer.trainable = True
         
-        # Recompile with lower learning rate and more regularization
+        # Recompile with moderate learning rate
         model.compile(
-            optimizer=Adam(learning_rate=FINE_TUNING_LEARNING_RATE),  # Even lower learning rate
+            optimizer=Adam(learning_rate=FINE_TUNING_LEARNING_RATE),
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
         
-        # Set up stronger regularization in data generator
-        self.train_datagen.dropout_rate = DROPOUT_RATE  # Add dropout in augmentation
-        
-        # Continue training with modified early stopping
-        early_stopping.patience = FINE_TUNING_PATIENCE  # Shorter patience for fine-tuning
+        # Use moderate early stopping in phase 2
+        early_stopping.patience = FINE_TUNING_PATIENCE
         
         history2 = model.fit(
             self.train_datagen.flow(X_train, y_train, batch_size=self.batch_size),
             validation_data=self.val_datagen.flow(X_val, y_val, batch_size=self.batch_size),
-            epochs=int(epochs * PHASE2_EPOCHS_RATIO),  # 40% of epochs for fine-tuning
+            epochs=int(epochs * PHASE2_EPOCHS_RATIO),
             callbacks=[early_stopping, checkpoint],
-            class_weight=self.class_weights
+            class_weight=self.class_weights,
+            verbose=1
         )
         
         # Load the best model (may be from phase 1 if phase 2 didn't improve)
@@ -281,9 +294,5 @@ class FaceModelTrainer:
         plt.show()
 
 if __name__ == "__main__":
-    trainer = FaceModelTrainer(
-        data_dir=DATA_DIR,
-        output_dir=OUTPUT_DIR
-    )
-    
-    model = trainer.train(epochs=EPOCHS)
+    trainer = FaceModelTrainer()
+    model = trainer.train()
