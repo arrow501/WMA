@@ -1,4 +1,7 @@
+numpy<2.0.0
 opencv-python
 matplotlib
-numpy
 pillow
+tqdm
+tensorflow>=2.10.0
+scikit-learn

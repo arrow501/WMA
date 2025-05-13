@@ -1,0 +1,13 @@
+Instructions
+Zad. 1 - 5p
+Przygotuj zbiór danych, czyli zbiór zdjęć na których są pokazane twarze przynajmniej 3-4 osób.
+Sklasyfikuj zdjęcia, czyli oznacz która twarz do kogo należy. Powinny być minimum 2 klasy,
+przynajmniej jedna klasa z konkretną osobą i obowiązkowa klasa "inne", 
+w której znajduje się jak najwięcej zdjęć różnych osób nie należących do wcześniejszych klas. 
+W każdej klasie powinno być minimum 100 próbek.
+
+Zad. 2 - 5p
+Przy pomocy biblioteki keras wytrenuj model sieci konwolucyjnej,
+który będzie w stanie klasyfikować przygotowywane twarze oraz do klasy "inne" podać wszystkie inne które się pojawią.
+Zad. 3 - 5p
+Przy pomocy biblioteki keras oraz openCV przygotuj program który odczytuje obraz z kamery, lokalizuje wszystkie twarze na klatce, oznacza je i podpisuje do kogo należy.
