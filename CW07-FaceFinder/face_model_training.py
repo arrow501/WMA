@@ -4,211 +4,286 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from tensorflow import keras
 from tensorflow.keras import layers, models
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import to_categorical
+from sklearn.preprocessing import LabelEncoder
 
-# Define the directories
-base_dir = 'CW07-FaceFinder/faces'
-output_dir = 'CW07-FaceFinder/faces_processed'
-model_save_dir = 'CW07-FaceFinder/model'
-classes = ['Arrow', 'Hanka', 'Inni', 'Johhny', 'Miki']
+# Globals
+# Directories
+DATA_DIR = 'CW07-FaceFinder/faces_normalized'
+OUTPUT_DIR = 'CW07-FaceFinder/model'
 
-# Create directories if they don't exist
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-if not os.path.exists(model_save_dir):
-    os.makedirs(model_save_dir)
+# Model parameters
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 32
+INITIAL_LEARNING_RATE = 0.001
+FINE_TUNING_LEARNING_RATE = 0.00005
 
-# Define target size for normalization
-target_size = (224, 224)  # Better for MobileNetV2
+# Training parameters
+EPOCHS = 30
+VALIDATION_SPLIT = 0.2
+RANDOM_STATE = 42
+EARLY_STOPPING_PATIENCE = 5
+FINE_TUNING_PATIENCE = 3
+PHASE1_EPOCHS_RATIO = 0.6
+PHASE2_EPOCHS_RATIO = 0.4
 
-def preprocess_images():
-    """Normalize and flip images, saving to output directory"""
-    print("Processing and flipping images...")
+# Data augmentation parameters
+ROTATION_RANGE = 20
+SHIFT_RANGE = 0.2
+SHEAR_RANGE = 0.2
+ZOOM_RANGE = 0.2
+BRIGHTNESS_RANGE = [0.8, 1.2]
+DROPOUT_RATE = 0.3
+
+
+class FaceModelTrainer:
+    """Class for training a face recognition model"""
     
-    for class_name in classes:
-        class_dir = os.path.join(base_dir, class_name)
-        output_class_dir = os.path.join(output_dir, class_name)
+    def __init__(self, data_dir, output_dir, img_size=IMG_SIZE, batch_size=BATCH_SIZE):
+        self.data_dir = data_dir
+        self.output_dir = output_dir
+        self.img_size = img_size
+        self.batch_size = batch_size
         
-        # Create class directory in output if it doesn't exist
-        if not os.path.exists(output_class_dir):
-            os.makedirs(output_class_dir)
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
         
-        print(f"Processing class: {class_name}")
+        # Image data generator for training augmentation
+        self.train_datagen = ImageDataGenerator(
+            rescale=1./255,
+            rotation_range=ROTATION_RANGE,
+            width_shift_range=SHIFT_RANGE,
+            height_shift_range=SHIFT_RANGE,
+            shear_range=SHEAR_RANGE,
+            zoom_range=ZOOM_RANGE,
+            horizontal_flip=True,
+            brightness_range=BRIGHTNESS_RANGE,
+            fill_mode='nearest'
+        )
         
-        # Get all image files
-        image_files = [f for f in os.listdir(class_dir) 
-                       if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        # Validation data generator (just rescaling)
+        self.val_datagen = ImageDataGenerator(rescale=1./255)
+    
+    def load_data(self):
+        """Load images from directories"""
+        print("Loading data...")
         
-        # Process each image and create a flipped version
-        for i, img_file in enumerate(tqdm(image_files, desc=class_name)):
-            img_path = os.path.join(class_dir, img_file)
-            
-            # Read image
-            img = cv2.imread(img_path)
-            if img is None:
-                print(f"Failed to read image: {img_path}")
-                continue
-            
-            # Convert BGR to RGB (Keras uses RGB)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            
-            # Normalize the image (resize)
-            normalized_img = cv2.resize(img, target_size)
-            
-            # Save the normalized version with sequential naming
-            norm_filename = f"{class_name}_{i:03d}.jpg"
-            norm_path = os.path.join(output_class_dir, norm_filename)
-            cv2.imwrite(norm_path, cv2.cvtColor(normalized_img, cv2.COLOR_RGB2BGR))
-            
-            # Create and save a flipped version
-            flipped_img = cv2.flip(normalized_img, 1)  # 1 for horizontal flip
-            flip_filename = f"{class_name}_{i:03d}_flipped.jpg"
-            flip_path = os.path.join(output_class_dir, flip_filename)
-            cv2.imwrite(flip_path, cv2.cvtColor(flipped_img, cv2.COLOR_RGB2BGR))
-
-def load_dataset():
-    """Load the normalized and flipped images into X and y arrays"""
-    images = []
-    labels = []
-    
-    print("Loading dataset...")
-    
-    for i, class_name in enumerate(classes):
-        class_dir = os.path.join(output_dir, class_name)
-        print(f"Loading class {i}: {class_name}")
+        images = []
+        labels = []
+        self.classes = []
         
-        # Get all image files
-        image_files = [f for f in os.listdir(class_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        # Get class directories
+        class_dirs = [d for d in os.listdir(self.data_dir) 
+                     if os.path.isdir(os.path.join(self.data_dir, d))]
+        self.classes = sorted(class_dirs)
         
-        for img_file in tqdm(image_files, desc=class_name):
-            img_path = os.path.join(class_dir, img_file)
+        print(f"Found {len(self.classes)} classes: {self.classes}")
+        
+        for class_idx, class_name in enumerate(self.classes):
+            class_dir = os.path.join(self.data_dir, class_name)
+            print(f"Loading class {class_idx}: {class_name}")
             
-            # Read image
-            img = cv2.imread(img_path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert to RGB
+            # Get image files
+            image_files = [f for f in os.listdir(class_dir) 
+                          if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
             
-            # Normalize pixel values to [0, 1]
-            img = img.astype('float32') / 255.0
-            
-            images.append(img)
-            labels.append(class_name)
+            # Load images
+            for img_file in tqdm(image_files):
+                img_path = os.path.join(class_dir, img_file)
+                img = cv2.imread(img_path)
+                
+                if img is None:
+                    print(f"Warning: Could not read {img_path}")
+                    continue
+                
+                # Convert to RGB and resize
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = cv2.resize(img, self.img_size)
+                
+                images.append(img)
+                labels.append(class_name)
+        
+        # Convert to numpy arrays
+        X = np.array(images)
+        y = np.array(labels)
+        
+        # Encode labels
+        self.label_encoder = LabelEncoder()
+        y_encoded = self.label_encoder.fit_transform(y)
+        
+        # Save classes for inference
+        np.save(os.path.join(self.output_dir, 'classes.npy'), self.label_encoder.classes_)
+        
+        # Convert to categorical
+        y_categorical = to_categorical(y_encoded)
+        
+        # Split data
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y_categorical, test_size=VALIDATION_SPLIT, stratify=y_encoded, random_state=RANDOM_STATE
+        )
+        
+        print(f"Training set: {X_train.shape[0]} images")
+        print(f"Validation set: {X_val.shape[0]} images")
+        
+        # Compute class weights (for handling imbalance)
+        class_counts = np.bincount(y_encoded)
+        total = np.sum(class_counts)
+        self.class_weights = {i: total / (len(class_counts) * count) 
+                             for i, count in enumerate(class_counts)}
+        
+        return X_train, X_val, y_train, y_val
     
-    # Convert to numpy arrays
-    X = np.array(images)
-    y = np.array(labels)
+    def create_model(self, num_classes):
+        """Create model architecture"""
+        # Use MobileNetV2 as base model
+        base_model = MobileNetV2(
+            input_shape=(*self.img_size, 3),
+            include_top=False,
+            weights='imagenet'
+        )
+        
+        # First, freeze all layers
+        for layer in base_model.layers:
+            layer.trainable = False
+        
+        # Create model
+        model = models.Sequential([
+            base_model,
+            layers.GlobalAveragePooling2D(),
+            layers.Dense(256, activation='relu'),
+            layers.Dropout(0.5),
+            layers.Dense(128, activation='relu'),
+            layers.Dropout(0.3),
+            layers.Dense(num_classes, activation='softmax')
+        ])
+        
+        # Compile model
+        model.compile(
+            optimizer=Adam(learning_rate=INITIAL_LEARNING_RATE),
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        
+        return model
     
-    # Encode labels
-    label_encoder = LabelEncoder()
-    y_encoded = label_encoder.fit_transform(y)
+    def train(self, epochs=20):
+        """Train the model with better overfitting prevention"""
+        # Load data
+        X_train, X_val, y_train, y_val = self.load_data()
+        
+        # Create model
+        model = self.create_model(len(self.classes))
+        model.summary()
+        
+        # Improved callbacks
+        early_stopping = EarlyStopping(
+            monitor='val_accuracy', 
+            patience=EARLY_STOPPING_PATIENCE,
+            restore_best_weights=True
+        )
+        
+        # Save best model during each phase
+        checkpoint = ModelCheckpoint(
+            os.path.join(self.output_dir, 'face_classifier.h5'),
+            monitor='val_accuracy', 
+            save_best_only=True,
+            verbose=1
+        )
+        
+        # Phase 1: Train with frozen base model
+        print("Phase 1: Training with frozen base model...")
+        history1 = model.fit(
+            self.train_datagen.flow(X_train, y_train, batch_size=self.batch_size),
+            validation_data=self.val_datagen.flow(X_val, y_val, batch_size=self.batch_size),
+            epochs=int(epochs * PHASE1_EPOCHS_RATIO),  # 60% of epochs for initial training
+            callbacks=[early_stopping, checkpoint],
+            class_weight=self.class_weights
+        )
+        
+        # Save best model from phase 1
+        model.save(os.path.join(self.output_dir, 'phase1_model.h5'))
+        
+        # Phase 2: Fine-tuning with more aggressive regularization
+        print("Phase 2: Fine-tuning with regularization...")
+        
+        # Unfreeze fewer layers (just last 15 instead of 20)
+        for layer in model.layers[0].layers[-15:]:
+            layer.trainable = True
+        
+        # Recompile with lower learning rate and more regularization
+        model.compile(
+            optimizer=Adam(learning_rate=FINE_TUNING_LEARNING_RATE),  # Even lower learning rate
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        
+        # Set up stronger regularization in data generator
+        self.train_datagen.dropout_rate = DROPOUT_RATE  # Add dropout in augmentation
+        
+        # Continue training with modified early stopping
+        early_stopping.patience = FINE_TUNING_PATIENCE  # Shorter patience for fine-tuning
+        
+        history2 = model.fit(
+            self.train_datagen.flow(X_train, y_train, batch_size=self.batch_size),
+            validation_data=self.val_datagen.flow(X_val, y_val, batch_size=self.batch_size),
+            epochs=int(epochs * PHASE2_EPOCHS_RATIO),  # 40% of epochs for fine-tuning
+            callbacks=[early_stopping, checkpoint],
+            class_weight=self.class_weights
+        )
+        
+        # Load the best model (may be from phase 1 if phase 2 didn't improve)
+        from tensorflow.keras.models import load_model
+        best_model = load_model(os.path.join(self.output_dir, 'face_classifier.h5'))
+        
+        # Final save
+        best_model.save(os.path.join(self.output_dir, 'face_classifier_final.h5'))
+        
+        # Combine histories for plotting
+        combined_history = {
+            'accuracy': history1.history['accuracy'] + history2.history['accuracy'],
+            'val_accuracy': history1.history['val_accuracy'] + history2.history['val_accuracy'],
+            'loss': history1.history['loss'] + history2.history['loss'],
+            'val_loss': history1.history['val_loss'] + history2.history['val_loss']
+        }
+        
+        # Plot training history
+        self.plot_history(combined_history)
+        
+        return best_model
     
-    # Save label encoder for inference
-    np.save(os.path.join(model_save_dir, 'classes.npy'), label_encoder.classes_)
-    
-    # Convert to categorical
-    y_categorical = to_categorical(y_encoded)
-    
-    return X, y_categorical, label_encoder.classes_
-
-def create_model(num_classes):
-    """Create and compile CNN model"""
-    # Use MobileNetV2 as base model (lightweight and efficient)
-    base_model = MobileNetV2(
-        input_shape=(224, 224, 3),
-        include_top=False,
-        weights='imagenet'
-    )
-    
-    # Freeze the base model
-    base_model.trainable = False
-    
-    # Create new model on top
-    model = models.Sequential([
-        base_model,
-        layers.GlobalAveragePooling2D(),
-        layers.Dense(128, activation='relu'),
-        layers.Dropout(0.5),
-        layers.Dense(num_classes, activation='softmax')
-    ])
-    
-    # Compile model
-    model.compile(
-        optimizer='adam',
-        loss='categorical_crossentropy',
-        metrics=['accuracy']
-    )
-    
-    return model
-
-def train_model():
-    """Main function to preprocess data and train the model"""
-    # Check if processed images exist, if not, create them
-    if not os.path.exists(output_dir) or len(os.listdir(output_dir)) == 0:
-        preprocess_images()
-    
-    # Load dataset
-    X, y, class_names = load_dataset()
-    print(f"Dataset loaded: {X.shape[0]} images, {len(class_names)} classes")
-    print(f"Classes: {class_names}")
-    
-    # Split data into training and validation sets
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-    print(f"Training set: {X_train.shape[0]} images")
-    print(f"Validation set: {X_val.shape[0]} images")
-    
-    # Create and compile model
-    model = create_model(len(class_names))
-    model.summary()
-    
-    # Callbacks
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    model_checkpoint = ModelCheckpoint(
-        os.path.join(model_save_dir, 'face_classifier.h5'),
-        monitor='val_accuracy',
-        save_best_only=True
-    )
-    
-    # Train model
-    print("Training model...")
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        epochs=15,
-        batch_size=32,
-        callbacks=[early_stopping, model_checkpoint]
-    )
-    
-    # Plot training history
-    plt.figure(figsize=(12, 4))
-    
-    plt.subplot(1, 2, 1)
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
-    plt.title('Model Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    
-    plt.subplot(1, 2, 2)
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
-    plt.title('Model Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(model_save_dir, 'training_history.png'))
-    plt.show()
-    
-    # Save model
-    model.save(os.path.join(model_save_dir, 'face_classifier_final.h5'))
-    print(f"Model saved to {os.path.join(model_save_dir, 'face_classifier_final.h5')}")
+    def plot_history(self, history):
+        """Plot training history"""
+        plt.figure(figsize=(12, 4))
+        
+        plt.subplot(1, 2, 1)
+        plt.plot(history['accuracy'], label='Training Accuracy')
+        plt.plot(history['val_accuracy'], label='Validation Accuracy')
+        plt.title('Model Accuracy')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(history['loss'], label='Training Loss')
+        plt.plot(history['val_loss'], label='Validation Loss')
+        plt.title('Model Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.legend()
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.output_dir, 'training_history.png'))
+        plt.show()
 
 if __name__ == "__main__":
-    train_model()
+    trainer = FaceModelTrainer(
+        data_dir=DATA_DIR,
+        output_dir=OUTPUT_DIR
+    )
+    
+    model = trainer.train(epochs=EPOCHS)
