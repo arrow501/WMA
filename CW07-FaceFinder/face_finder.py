@@ -8,12 +8,14 @@ from tensorflow.keras.models import load_model
 # Globals
 DEFAULT_MODEL_PATH = 'CW07-FaceFinder/model/face_classifier_final.h5'
 DEFAULT_CLASSES_PATH = 'CW07-FaceFinder/model/classes.npy'
-DEFAULT_CONFIDENCE_THRESHOLD = 0.6  # Lowered threshold
+DEFAULT_CONFIDENCE_THRESHOLD = 0.7  # Original threshold
 DEFAULT_WINDOW_SIZE = "800x600"
 FRAMERATE = 30  # fps
-OTHERS_CONFIDENCE_THRESHOLD = 0.5  # Balanced threshold for "Others" class
+OTHERS_CONFIDENCE_THRESHOLD = 0.8  # Threshold for "Others" class
 TARGET_FACE_SIZE = (224, 224)
 MIN_FACE_SIZE = (30, 30)
+DEFAULT_BLUR = 0  # Default blur level (0 = no blur)
+MAX_BLUR = 14  # Maximum blur level
 
 class FaceRecognizer:
     """Main class for face detection and recognition"""
@@ -35,6 +37,9 @@ class FaceRecognizer:
                 self.others_idx = i
                 break
         
+        # Blur level
+        self.blur_level = DEFAULT_BLUR
+        
         print(f"Loaded model with classes: {self.class_names}")
         print(f"Others class index: {self.others_idx}")
     
@@ -47,9 +52,15 @@ class FaceRecognizer:
         return faces
     
     def process_face(self, face_img, target_size=TARGET_FACE_SIZE):
-        """Preprocess a face for the classifier"""
+        """Preprocess a face for the classifier with optional blur"""
         # Resize
         face_resized = cv2.resize(face_img, target_size)
+        
+        # Apply gaussian blur if blur_level > 0
+        if self.blur_level > 0:
+            # Ensure kernel size is odd
+            kernel_size = 2 * self.blur_level + 1
+            face_resized = cv2.GaussianBlur(face_resized, (kernel_size, kernel_size), 0)
         
         # Convert to RGB (model was trained on RGB)
         face_rgb = cv2.cvtColor(face_resized, cv2.COLOR_BGR2RGB)
@@ -63,45 +74,41 @@ class FaceRecognizer:
         return face_batch
     
     def classify_face(self, face_batch):
-        """Improved two-step classification process"""
+        """Classification from original model with two-stage approach"""
         # Make prediction
         predictions = self.model.predict(face_batch, verbose=0)[0]
         
-        # Get the top 2 predictions
+        # Get the top predictions
         class_indices = np.argsort(predictions)[::-1]  # Sort indices by confidence (descending)
         
-        # Check if the highest confidence is for a known person
-        if self.others_idx >= 0 and class_indices[0] != self.others_idx:
-            # If best prediction is a known person with decent confidence
-            best_idx = class_indices[0]
-            confidence = predictions[best_idx]
-            if confidence >= self.confidence_threshold:
-                return self.class_names[best_idx], confidence, predictions
+        # First check if it's likely to be "Others" or a known person
+        if self.others_idx >= 0:
+            others_confidence = predictions[self.others_idx]
+            
+            # If high confidence in Others class, return as Unknown
+            if others_confidence > OTHERS_CONFIDENCE_THRESHOLD:
+                return "Unknown", others_confidence, predictions
         
-        # If best is Others OR a low-confidence known person, check other options
-        known_confidences = [(i, predictions[i]) for i in range(len(self.class_names)) 
-                             if i != self.others_idx]
-        known_confidences.sort(key=lambda x: x[1], reverse=True)
+        # Get the highest confidence prediction (excluding Others)
+        class_indices = np.argsort(predictions)[::-1]  # Sort indices by confidence (descending)
         
-        # If any known person has reasonable confidence
-        if known_confidences and known_confidences[0][1] >= self.confidence_threshold:
-            best_idx = known_confidences[0][0]
-            confidence = known_confidences[0][1]
-            return self.class_names[best_idx], confidence, predictions
+        # Skip Others in sorted indices if it's the highest
+        if self.others_idx >= 0 and class_indices[0] == self.others_idx:
+            class_idx = class_indices[1]  # Take second best if Others is best
+            confidence = predictions[class_idx]
+            # Only classify as a known person if confidence is high enough
+            if confidence < self.confidence_threshold:
+                return "Unknown", confidence, predictions
+        else:
+            class_idx = class_indices[0]
+            confidence = predictions[class_idx]
+            # Standard threshold check
+            if confidence < self.confidence_threshold:
+                return "Unknown", confidence, predictions
         
-        # If Others class has high confidence
-        if self.others_idx >= 0 and predictions[self.others_idx] > OTHERS_CONFIDENCE_THRESHOLD:
-            return "Unknown", predictions[self.others_idx], predictions
-        
-        # Get the highest confidence prediction as fallback
-        best_idx = class_indices[0]
-        confidence = predictions[best_idx]
-        
-        # Apply final threshold check
-        if confidence < self.confidence_threshold:
-            return "Unknown", confidence, predictions
-        
-        return self.class_names[best_idx], confidence, predictions
+        # Return the class name and confidence
+        class_name = self.class_names[class_idx]
+        return class_name, confidence, predictions
 
 class FaceRecognitionApp:
     """Application for face recognition using webcam"""
@@ -142,7 +149,7 @@ class FaceRecognitionApp:
         tk.Label(threshold_frame, text="Confidence:").pack(side=tk.LEFT, padx=5)
         self.threshold_var = tk.DoubleVar(value=self.recognizer.confidence_threshold)
         threshold_slider = tk.Scale(threshold_frame, from_=0.2, to=0.95, resolution=0.05,
-                                  orient=tk.HORIZONTAL, length=200,
+                                  orient=tk.HORIZONTAL, length=150,
                                   variable=self.threshold_var,
                                   command=self.update_threshold)
         threshold_slider.pack(side=tk.LEFT, padx=5)
@@ -154,10 +161,22 @@ class FaceRecognitionApp:
         tk.Label(others_frame, text="Others Threshold:").pack(side=tk.LEFT, padx=5)
         self.others_threshold_var = tk.DoubleVar(value=OTHERS_CONFIDENCE_THRESHOLD)
         others_slider = tk.Scale(others_frame, from_=0.2, to=0.95, resolution=0.05,
-                              orient=tk.HORIZONTAL, length=200,
+                              orient=tk.HORIZONTAL, length=150,
                               variable=self.others_threshold_var,
                               command=self.update_others_threshold)
         others_slider.pack(side=tk.LEFT, padx=5)
+        
+        # Blur slider
+        blur_frame = tk.Frame(controls)
+        blur_frame.pack(side=tk.LEFT, padx=10)
+        
+        tk.Label(blur_frame, text="Blur:").pack(side=tk.LEFT, padx=5)
+        self.blur_var = tk.IntVar(value=self.recognizer.blur_level)
+        blur_slider = tk.Scale(blur_frame, from_=0, to=MAX_BLUR, resolution=1,
+                            orient=tk.HORIZONTAL, length=150,
+                            variable=self.blur_var,
+                            command=self.update_blur)
+        blur_slider.pack(side=tk.LEFT, padx=5)
         
         # Status bar
         self.status = tk.StringVar(value="Ready")
@@ -210,6 +229,10 @@ class FaceRecognitionApp:
         """Update Others class threshold"""
         global OTHERS_CONFIDENCE_THRESHOLD
         OTHERS_CONFIDENCE_THRESHOLD = self.others_threshold_var.get()
+    
+    def update_blur(self, *args):
+        """Update blur level"""
+        self.recognizer.blur_level = self.blur_var.get()
     
     def update_frame(self):
         """Update camera frame and perform face recognition"""
@@ -282,11 +305,12 @@ class FaceRecognitionApp:
             image=self.photo, anchor=tk.CENTER
         )
         
-        # Update frame count in status
-        face_count = len(faces)
-        self.status.set(f"Detected {face_count} face{'s' if face_count != 1 else ''}")
+        # Update status bar with current settings
+        blur_text = "No Blur" if self.recognizer.blur_level == 0 else f"Blur: {2*self.recognizer.blur_level+1}x{2*self.recognizer.blur_level+1}"
+        others_text = f"Others: {OTHERS_CONFIDENCE_THRESHOLD:.2f}"
+        self.status.set(f"Faces: {len(faces)} | Threshold: {self.recognizer.confidence_threshold:.2f} | {others_text} | {blur_text}")
         
-        # Schedule next update - convert fps to milliseconds
+        # Schedule next update
         self.root.after(int(1000 / FRAMERATE), self.update_frame)
     
     def on_close(self):
