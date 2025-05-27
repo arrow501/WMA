@@ -3,3 +3,11 @@ CW07-FaceFinder/faces/*
 CW07-FaceFinder/faces_normalized/*
 CW07-FaceFinder/faces_normalized.zip
 CW07-FaceFinder/model.zip
+/CW11-SeatBinner/Labels
+/CW11-SeatBinner/labels_my-project-name_2025-05-27-06-11-05
+CW11-SeatBinner/labels_my-project-name_2025-05-27-06-11-05.zip
+CW11-SeatBinner/labels_my-project-name_2025-05-27-12-31-05.zip
+/CW11-SeatBinner/labels_my-project-name_2025-05-27-12-31-05
+CW11-SeatBinner/Unlabeled.zip
+vscode-extensions.txt
+CW11-SeatBinner/YOLO_pro5_reference_from_teacher.ipynb
