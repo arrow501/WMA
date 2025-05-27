@@ -1,0 +1,4 @@
+black_lounger
+red_lounger
+concrete_bench
+gray_bin
