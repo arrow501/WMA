@@ -4,13 +4,11 @@ YOLO Training Script for Seat/Bin Detection
 Supports training YOLOv5 models from scratch or pretrained weights
 """
 
-import os
 import shutil
 import yaml
 from pathlib import Path
 import argparse
 from sklearn.model_selection import train_test_split
-import random
 from ultralytics import YOLO
 import torch
 
@@ -116,15 +114,55 @@ class YOLOTrainer:
         with open(yaml_path, 'w') as f:
             yaml.dump(data_yaml, f, default_flow_style=False)
         
-        print(f"Dataset prepared:")
+        print("Dataset prepared:")
         print(f"  Train: {len(train_imgs)} images")
         print(f"  Val: {len(val_imgs)} images")
         print(f"  Data config: {yaml_path}")
         
         return yaml_path
     
-    def train_model(self, model_size='s', pretrained=True, epochs=50, batch_size=8, 
-                   img_size=640, device='cpu', patience=10):
+    def validate_images(self):
+        """Validate and clean image files"""
+        print("Validating image files...")
+        
+        import cv2
+        from PIL import Image
+        
+        corrupted_files = []
+        
+        for img_file in self.photos_dir.glob("*.jpg"):
+            try:
+                # Try to load with PIL first
+                with Image.open(img_file) as img:
+                    img.verify()
+                
+                # Try to load with OpenCV
+                img_cv = cv2.imread(str(img_file))
+                if img_cv is None:
+                    corrupted_files.append(img_file)
+                    continue
+                    
+            except Exception as e:
+                print(f"Corrupted image found: {img_file} - {e}")
+                corrupted_files.append(img_file)
+        
+        if corrupted_files:
+            print(f"Found {len(corrupted_files)} corrupted images. Removing them...")
+            for corrupted_file in corrupted_files:
+                # Remove image and corresponding label
+                label_file = self.labels_dir / f"{corrupted_file.stem}.txt"
+                try:
+                    corrupted_file.unlink()
+                    if label_file.exists():
+                        label_file.unlink()
+                    print(f"Removed: {corrupted_file.name}")
+                except Exception as e:
+                    print(f"Failed to remove {corrupted_file.name}: {e}")
+        
+        print(f"Image validation complete. {len(corrupted_files)} files removed.")
+
+    def train_model(self, model_size='s', pretrained=True, epochs=50, batch_size=4, 
+                   img_size=640, device='cpu', patience=10, workers=0):
         """
         Train YOLO model
         
@@ -136,8 +174,12 @@ class YOLOTrainer:
             img_size: Input image size
             device: 'cpu' or 'cuda'
             patience: Early stopping patience
+            workers: Number of dataloader workers (0 for Windows compatibility)
         """
         print(f"\nTraining YOLOv5{model_size} ({'pretrained' if pretrained else 'from scratch'})...")
+        
+        # Validate images first
+        self.validate_images()
         
         # Prepare dataset
         data_yaml_path = self.prepare_dataset()
@@ -155,8 +197,9 @@ class YOLOTrainer:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         print(f"Using device: {device}")
+        print(f"Batch size: {batch_size}, Workers: {workers}")
         
-        # Train
+        # Train with Windows-compatible settings
         results = model.train(
             data=str(data_yaml_path),
             epochs=epochs,
@@ -167,7 +210,10 @@ class YOLOTrainer:
             save=True,
             project=str(self.models_dir),
             name=f"yolov5{model_size}_{'pretrained' if pretrained else 'scratch'}",
-            exist_ok=True
+            exist_ok=True,
+            workers=workers,  
+            single_cls=False, 
+            verbose=True
         )
         
         # Save model with descriptive name
@@ -182,9 +228,9 @@ class YOLOTrainer:
         
         return model_path, results
     
-    def train_all_models(self, epochs=50, batch_size=8, device='cpu'):
-        """Train all model variants"""
-        model_sizes = ['n', 's', 'm']  # Start with smaller models for CPU
+    def train_all_models(self, epochs=30, batch_size=16, device='cpu'):
+        """Train all model variants with Windows-optimized settings"""
+        model_sizes = ['n', 's', 'm']  
         pretrained_options = [True, False]
         
         results = {}
@@ -201,7 +247,8 @@ class YOLOTrainer:
                         pretrained=pretrained,
                         epochs=epochs,
                         batch_size=batch_size,
-                        device=device
+                        device=device,
+                        workers=8
                     )
                     
                     results[f"yolov5{size}_{'pretrained' if pretrained else 'scratch'}"] = {
@@ -209,6 +256,10 @@ class YOLOTrainer:
                         'results': train_results
                     }
                     
+                    
+                except KeyboardInterrupt:
+                    print(f"\nTraining interrupted by user for YOLOv5{size}")
+                    break
                 except Exception as e:
                     print(f"Error training YOLOv5{size} ({'pretrained' if pretrained else 'scratch'}): {e}")
                     continue
@@ -217,25 +268,34 @@ class YOLOTrainer:
 
 def main():
     parser = argparse.ArgumentParser(description='Train YOLO models for seat/bin detection')
-    parser.add_argument('--model', '-m', default='s', choices=['n', 's', 'm', 'l', 'x'],
-                       help='Model size (default: s)')
+    parser.add_argument('--model', '-m', default='n', choices=['n', 's', 'm', 'l', 'x'],
+                       help='Model size (default: n)')
     parser.add_argument('--pretrained', '-p', action='store_true',
                        help='Use pretrained weights')
     parser.add_argument('--epochs', '-e', type=int, default=50,
                        help='Number of epochs (default: 50)')
-    parser.add_argument('--batch-size', '-b', type=int, default=8,
-                       help='Batch size (default: 8)')
+    parser.add_argument('--batch-size', '-b', type=int, default=4,
+                       help='Batch size (default: 4, reduced for CPU training)')
     parser.add_argument('--device', '-d', default='cpu',
                        help='Device to use (default: cpu)')
     parser.add_argument('--all', '-a', action='store_true',
                        help='Train all model variants')
     parser.add_argument('--img-size', type=int, default=640,
                        help='Input image size (default: 640)')
+    parser.add_argument('--workers', type=int, default=0,
+                       help='Number of dataloader workers (default: 0 for Windows)')
+    parser.add_argument('--validate-images', action='store_true',
+                       help='Only validate images without training')
     
     args = parser.parse_args()
     
     # Initialize trainer
     trainer = YOLOTrainer()
+    
+    # If only validating images
+    if args.validate_images:
+        trainer.validate_images()
+        return
     
     if args.all:
         print("Training all model variants...")
@@ -258,7 +318,8 @@ def main():
             epochs=args.epochs,
             batch_size=args.batch_size,
             img_size=args.img_size,
-            device=args.device
+            device=args.device,
+            workers=args.workers
         )
         print(f"Model saved to: {model_path}")
 
